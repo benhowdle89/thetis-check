@@ -1,0 +1,12 @@
+{
+  "name": "thetis",
+  "description": "Thetis: production readiness for apps built with AI coding tools",
+  "owner": { "name": "Ben Howdle", "email": "hello@benhowdle.im" },
+  "plugins": [
+    {
+      "name": "thetis-check",
+      "source": "./plugin",
+      "description": "Free 14-point production-readiness check: static, read-only, no AI judgement"
+    }
+  ]
+}
