@@ -3,7 +3,7 @@
 A free production-readiness check for apps built with AI coding tools. It's a plugin for [Claude Code](https://claude.com/claude-code), Anthropic's coding agent. It runs 14 basic checks on your repository: leaked keys in git history, data other users could see, committed database dumps, payment webhooks, backups, vulnerable libraries, runaway costs, and who (or what) can change production.
 
 - **Static:** plain scripts, no AI judgement. The same repo gives the same report.
-- **Read-only:** it changes nothing in your repository. The report is saved to `~/.thetis-check/reports/`.
+- **Read-only:** it changes nothing in your repository. The report is saved to `~/.thetis-check/reports/`, with a formatted copy you can open in your browser, print or share.
 - **Private:** your code never leaves your machine. The dependency check sends package names and versions (not code) to the npm registry; `--offline` skips it.
 
 ## Install

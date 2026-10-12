@@ -9,7 +9,7 @@ allowed-tools: Bash(python3 *)
 
 ## Your reply is the report
 
-The user can't see command output: it's collapsed in their view. So **your final message must be the full report, copied verbatim from the command output, from its first line ("# Thetis free check: …") to its last line.** Nothing before it, no summary instead of it, no commentary after it apart from the "Saved to …" line. A summary such as "the report is above" or "two red flags were found" fails the user, because they never see the report.
+The user can't see command output: it's collapsed in their view. So **your final message must be the full report, copied verbatim from the command output, from its first line ("# Thetis free check: …") to its last line.** Nothing before it, no summary instead of it, no commentary after it apart from the "Saved to …" and "Formatted report …" lines. A summary such as "the report is above" or "two red flags were found" fails the user, because they never see the report.
 
 ## Steps
 

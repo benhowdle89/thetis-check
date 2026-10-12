@@ -22,7 +22,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.2.2"
+VERSION = "0.3.0"
 SITE = "https://thetis.benhowdle.im"
 EMAIL = "hello@benhowdle.im"
 
@@ -912,11 +912,21 @@ def main(argv):
     path = os.path.join(out_dir, f"{os.path.basename(repo.root)}-{stamp}.md")
     with open(path, "w") as f:
         f.write(report)
+    # A formatted copy to open in a browser, print or share. Never fatal: the Markdown is the report.
+    html_path = None
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import thetis_html
+        html_path = thetis_html.write(path, kind="Free check")[0]
+    except Exception:
+        html_path = None
     if "--json" in flags:
         print(json.dumps([{"id": r.id, "name": r.name, "status": r.status, "found": r.found} for r in results], indent=2))
     else:
         print(report)
         print(f"Saved to {path}")
+        if html_path:
+            print(f"Formatted report (open in your browser): {html_path}")
 
 
 if __name__ == "__main__":
