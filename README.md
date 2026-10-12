@@ -36,7 +36,7 @@ python3 thetis-check/plugin/skills/run/scripts/thetis_check.py /path/to/your/app
 
 **R** needs fixing · **A** weak spot · **OK** nothing found by this basic check · **NV** not checked (needs a person or your dashboards) · **—** doesn't apply
 
-"OK" never means safe. It means this basic check found nothing. For a full review, where a person confirms each finding and you get fixes you only pay for when their tests pass, see [thetis.benhowdle.im](https://thetis.benhowdle.im).
+"OK" never means safe. It means this basic check found nothing. For a full review, where Ben runs the Thetis review engine, checks every finding himself, and you get fixes you only pay for when their tests pass, see [thetis.benhowdle.im](https://thetis.benhowdle.im).
 
 ## Requirements
 
