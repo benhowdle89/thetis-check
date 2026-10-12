@@ -218,8 +218,8 @@ def _starts_block(line):
 # --- page -------------------------------------------------------------------------------------
 
 MARK = ('<svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--mark-bg)"/>'
-        '<path d="M8.5 9.5h15M16 9.5v14" stroke="var(--mark-fg)" stroke-width="3.4" stroke-linecap="round" fill="none"/>'
-        '<circle cx="23.2" cy="23.2" r="3.4" fill="var(--bronze)"/></svg>')
+        '<path d="M9.5 9.5h13M16 9.5v13" stroke="var(--mark-fg)" stroke-width="2.9" stroke-linecap="round" fill="none"/>'
+        '<circle cx="21.6" cy="22.1" r="2.25" fill="var(--bronze)"/></svg>')
 
 CSS = """
 :root{color-scheme:dark;
