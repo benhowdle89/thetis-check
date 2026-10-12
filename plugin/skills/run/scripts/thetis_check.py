@@ -22,7 +22,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.1.2"
+VERSION = "0.2.0"
 SITE = "https://thetis.benhowdle.im"
 EMAIL = "hello@benhowdle.im"
 
@@ -78,11 +78,19 @@ class Repo:
         self.files = self._files()
         self._text = {}
         self.pkg = self._json("package.json") or {}
-        deps = {}
-        for k in ("dependencies", "devDependencies", "optionalDependencies"):
-            deps.update(self.pkg.get(k) or {})
-        self.deps = deps
-        self.prod_deps = dict(self.pkg.get("dependencies") or {})
+        # Every package in the repo: subfolder apps (site/) and monorepos (apps/*) count too.
+        self.pkgs = {f: (self._json(f) or {}) for f in self.files if f == "package.json" or f.endswith("/package.json")}
+        deps, prod, scripts = {}, {}, {}
+        for path, pkg in self.pkgs.items():
+            for k in ("dependencies", "devDependencies", "optionalDependencies"):
+                deps.update(pkg.get(k) or {})
+            prod.update(pkg.get("dependencies") or {})
+            where = os.path.dirname(path)
+            for name, cmd in (pkg.get("scripts") or {}).items():
+                scripts[f"{where}: {name}" if where else name] = cmd
+        self.deps, self.prod_deps, self.scripts = deps, prod, scripts
+        self.name = self.pkg.get("name") or next((p.get("name") for p in self.pkgs.values() if p.get("name")), None) \
+            or os.path.basename(self.root)
 
     def git(self, *args, **kw):
         return subprocess.run(["git", "-C", self.root, *args], capture_output=True, text=True, errors="replace", **kw)
@@ -174,6 +182,12 @@ def check_01(repo, opts):
         r.rate("R")
         r.found.append(f"Secret files were committed at some point: {', '.join(secret_files[:8])}"
                        f"{' and more' if len(secret_files) > 8 else ''}. Their contents were not read.")
+    for w in wrangler_configs(repo):
+        if w["secret_vars"]:
+            r.rate("A")
+            r.found.append(f"{w['file']} sets secret-looking values in plain config: {', '.join(w['secret_vars'][:6])}. "
+                           "Values in [vars] are committed and visible to anyone with the code; use `wrangler secret` instead. "
+                           "The values were not read into this report.")
     hits, scanned, partial = scan_history(repo, opts)
     for (name, f, commit), live in sorted(hits.items()):
         r.rate("R" if live else "A")
@@ -272,11 +286,11 @@ def check_03(repo, opts):
         r.rate("A")
         r.found.append(f"The app assumes it's in development when no environment is set, at {where(unsafe_default)}. "
                        "If production ever loses that setting, development shortcuts switch on.")
-    admin = repo.grep(r"""['"`]/(api/)?(admin|debug|internal|seed|_debug)(/|['"`])""", limit=100, app_only=True)
-    if admin:
-        count = f"{'At least ' if len(admin) >= 100 else ''}{len(admin)}"
-        r.found.append(f"{count} references to admin, debug or internal routes, for example at {where(admin, 3)}. "
-                       "Each one should require an admin login.")
+    inv = opts.get("inventory") or {}
+    if inv.get("routes"):
+        admin_note = f", {inv['admin_routes']} of them admin, internal or scheduled" if inv.get("admin_routes") else ""
+        r.found.append(f"{inv['routes']} API routes found{admin_note}. Each one should check who's calling; "
+                       "admin routes should also check they're an admin.")
     if r.status is None:
         r.rate("NV")
     if not r.found:
@@ -329,7 +343,7 @@ def check_05(repo, opts):
 
 def check_06(repo, opts):
     r = Result("06")
-    r.meaning = "Copies of real people's data in the code repository are readable by everyone who has the code, forever."
+    r.meaning = "Personal data should only be where it has to be: not in your code, your logs or your analytics, and you should be able to delete it on request."
     r.unseen = "Whether you can delete or export one person's data end to end, and what goes to your analytics tools."
     dump_ext = {".sqlite", ".sqlite3", ".db", ".dump", ".bak", ".xlsx", ".csv", ".sql"}
     risky = []
@@ -373,13 +387,14 @@ def check_06(repo, opts):
 def check_07(repo, opts):
     r = Result("07")
     payments = repo.has_dep("stripe", "@stripe/stripe-js", "@paddle/paddle-node-sdk", "@lemonsqueezy/lemonsqueezy.js",
-                            "react-native-purchases", "@revenuecat/purchases-js")
+                            "react-native-purchases", "@revenuecat/purchases-js") or (opts.get("inventory") or {}).get("payments", [])
     if not payments:
         r.rate("—"); r.found.append("No payment library found.")
         return r
     r.meaning = "Your app should only believe payment messages that really came from the payment provider, and count each one once."
     r.unseen = "Whether a repeated message could grant something twice. The full review checks that."
-    verify = repo.grep(r"constructEvent(Async)?\(|webhooks\.constructEvent|verifyHeader\(|verifyWebhook|webhooks\.unwrap\(", app_only=True)
+    verify = repo.grep(r"constructEvent(Async)?\(|webhooks\.constructEvent|verifyHeader\(|verifyWebhook|webhooks\.unwrap\(|"
+                       r"stripe-signature|timingSafeEqual|crypto\.subtle\.(verify|sign)\(.*HMAC", app_only=True)
     webhook = repo.grep(r"webhook", flags=re.I, limit=200, app_only=True)
     if verify:
         r.rate("OK")
@@ -395,7 +410,8 @@ def check_07(repo, opts):
 
 def check_08(repo, opts):
     r = Result("08")
-    if not repo.has_dep("stripe", "@paddle/paddle-node-sdk", "@lemonsqueezy/lemonsqueezy.js", "react-native-purchases"):
+    if not (repo.has_dep("stripe", "@paddle/paddle-node-sdk", "@lemonsqueezy/lemonsqueezy.js", "react-native-purchases")
+            or (opts.get("inventory") or {}).get("payments")):
         r.rate("—"); r.found.append("No payment library found.")
         return r
     r.meaning = "Customers shouldn't be able to choose their own price or reach paid features without paying."
@@ -447,7 +463,7 @@ def check_10(repo, opts):
     r.unseen = "Backups are set in your provider's dashboard, so code can't confirm them."
     hints = provider_hint(repo)
     r.found.append("Check " + "; ".join(hints) + "." if hints else "Check your database provider's backup settings.")
-    scripts = [k for k, v in (repo.pkg.get("scripts") or {}).items() if re.search(r"backup|export|dump", k + " " + str(v), re.I)]
+    scripts = [k for k, v in repo.scripts.items() if re.search(r"backup|export|dump", k + " " + str(v), re.I)]
     if scripts:
         r.found.append(f"Backup scripts exist ({', '.join(scripts[:3])}), but a script someone has to remember to run isn't an automatic backup.")
     return r
@@ -472,23 +488,33 @@ def check_12(repo, opts):
     r = Result("12")
     r.meaning = "Code libraries with published security holes are the easiest way in, especially ones that handle logins or payments."
     r.unseen = "Whether your app actually uses the vulnerable part of each library."
-    if not repo.pkg:
-        r.rate("NV"); r.found.append("No package.json at the top of the repository. This version only checks npm projects.")
+    if not repo.pkgs:
+        r.rate("NV"); r.found.append("No package.json in the repository. This version only audits npm projects.")
         return r
     if opts["offline"]:
         r.rate("NV"); r.found.append("Skipped (--offline).")
         return r
-    if not shutil.which("npm") or not os.path.exists(os.path.join(repo.root, "package-lock.json")):
-        r.rate("NV"); r.found.append("Needs npm and a package-lock.json to check.")
+    locks = [os.path.dirname(f) for f in repo.files if os.path.basename(f) in ("package-lock.json", "npm-shrinkwrap.json")]
+    if not shutil.which("npm") or not locks:
+        other = [f for f in repo.files if os.path.basename(f) in ("pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock")]
+        r.rate("NV")
+        r.found.append(f"Uses {os.path.basename(other[0])}, which this version doesn't audit yet. `pnpm audit` or `yarn npm audit` will check it."
+                       if other else "Needs npm and a package-lock.json to check.")
         return r
-    out = subprocess.run(["npm", "audit", "--omit=dev", "--json"], cwd=repo.root, capture_output=True, text=True)
-    try:
-        data = json.loads(out.stdout)
-    except ValueError:
+    vulns, audited = {}, []
+    for d in locks[:6]:
+        out = subprocess.run(["npm", "audit", "--omit=dev", "--json"], cwd=os.path.join(repo.root, d),
+                             capture_output=True, text=True)
+        try:
+            vulns.update(json.loads(out.stdout).get("vulnerabilities") or {})
+            audited.append(d or ".")
+        except ValueError:
+            continue
+    if not audited:
         r.rate("NV"); r.found.append("npm audit didn't return a result (offline or registry error).")
         return r
     bad = []
-    for name, v in (data.get("vulnerabilities") or {}).items():
+    for name, v in vulns.items():
         sev = v.get("severity")
         if sev not in ("critical", "high", "moderate"):
             continue
@@ -503,12 +529,12 @@ def check_12(repo, opts):
         r.rate(status)
     if bad:
         top = sorted(bad, key=lambda b: (-SEVERITY[b[0]], ["critical", "high", "moderate"].index(b[1])))[:8]
-        r.found.append(f"{len(bad)} libraries with known holes at moderate or above: " +
+        r.found.append(f"{len(bad)} {'library' if len(bad) == 1 else 'libraries'} with known holes at moderate or above: " +
                        "; ".join(f"{n} ({s}, {'direct' if d else 'via another library'})" for _, s, n, _, d in top) +
                        (" and more." if len(bad) > 8 else "."))
     else:
         r.rate("OK")
-        r.found.append("npm audit found no moderate, high or critical holes in production libraries.")
+        r.found.append(f"npm audit found no moderate, high or critical holes in production libraries ({len(audited)} lockfile{'s' if len(audited) > 1 else ''}).")
     return r
 
 
@@ -530,7 +556,9 @@ def check_13(repo, opts):
         return r
     r.meaning = "Features that cost money per use (AI, email, SMS) need limits, or one bot or bug can run up a huge bill."
     r.unseen = "Spending caps and alerts, which live in each provider's dashboard."
-    limits = repo.grep(r"rate.?limit|ratelimit|throttl|@upstash/ratelimit|express-rate-limit|limiter", flags=re.I, limit=5, app_only=True)
+    server_exts = CODE_EXT - {".tsx", ".jsx", ".vue", ".svelte", ".astro", ".html"}
+    limits = repo.grep(r"rate.?limit|ratelimit|throttl|@upstash/ratelimit|express-rate-limit|limiter", exts=server_exts,
+                       flags=re.I, limit=5, app_only=True)
     warnings = repo.grep(r"console\.(warn|error)\(.*\b(rate.?limit|cost|spend|budget|token.?limit|governor|quota)\b.*\b(off|disabled|unbounded|uncapped|no limit)\b"
                          r"|console\.(warn|error)\(.*\b(unbounded|uncapped)\b.*\b(spend|cost)\b", flags=re.I, app_only=True)
     if warnings:
@@ -558,8 +586,9 @@ def check_14(repo, opts):
     r = Result("14")
     r.meaning = "Something mechanical, not just good intentions, should stop a mistake by a person, a pipeline or an AI assistant reaching the live app."
     r.unseen = "Branch protection, deploy approvals and who holds production access. Those are set in GitHub and your hosting dashboards."
-    writes = [(k, v) for k, v in (repo.pkg.get("scripts") or {}).items()
-              if PROD_WRITE.search(str(v)) and not (NON_PROD.search(f"{k} {v}") and not re.search("prod", f"{k} {v}", re.I))]
+    writes = [(k, v) for k, v in repo.scripts.items()
+              if PROD_WRITE.search(str(v)) and "--dry-run" not in str(v)
+              and not (NON_PROD.search(f"{k} {v}") and not re.search("prod", f"{k} {v}", re.I))]
     settings = [p for p in (".claude/settings.json", ".claude/settings.local.json") if p in repo.files
                 or os.path.exists(os.path.join(repo.root, p))]
     allow, deny, mode = [], [], None
@@ -596,6 +625,113 @@ def check_14(repo, opts):
     return r
 
 
+ROUTE_DEF = re.compile(r"""\b(?:app|router|api|routes?|server|hono|fastify|r)\s*\.\s*(?:get|post|put|patch|delete|all)\s*\(\s*['"`](/[^'"`]*)""")
+PATH_CHECK = re.compile(r"""pathname\s*(?:===?|\.startsWith\()\s*['"`](/[^'"`]*)""")
+FILE_ROUTE = re.compile(r"(^|/)(app|src/app)/(.+/)?route\.[jt]sx?$|(^|/)pages/api/.+\.[jt]sx?$|(^|/)functions/.+\.[jt]s$")
+PAID_HOSTS = {"api.openai.com": "OpenAI", "api.anthropic.com": "Anthropic", "generativelanguage.googleapis.com": "Gemini",
+              "api.resend.com": "Resend", "api.twilio.com": "Twilio",
+              "api.sendgrid.com": "SendGrid", "api.postmarkapp.com": "Postmark", "api.replicate.com": "Replicate"}
+PAID_DEPS = {"openai": "OpenAI", "@anthropic-ai/sdk": "Anthropic", "@google/generative-ai": "Gemini", "@google/genai": "Gemini",
+             "ai": "Vercel AI SDK", "resend": "Resend", "twilio": "Twilio", "@sendgrid/mail": "SendGrid",
+             "postmark": "Postmark", "replicate": "Replicate", "groq-sdk": "Groq", "@mistralai/mistralai": "Mistral"}
+
+
+def wrangler_configs(repo):
+    """Cloudflare config files: bindings and [vars], parsed loosely (toml and json)."""
+    found = []
+    for f in repo.files:
+        base = os.path.basename(f)
+        if base in ("wrangler.toml", "wrangler.json", "wrangler.jsonc"):
+            text = repo.text(f)
+            found.append({
+                "file": f,
+                "d1": len(re.findall(r"\[\[\s*(?:env\.\w+\.)?d1_databases\s*\]\]|\"d1_databases\"", text)),
+                "kv": len(re.findall(r"\[\[\s*(?:env\.\w+\.)?kv_namespaces\s*\]\]|\"kv_namespaces\"", text)),
+                "r2": len(re.findall(r"\[\[\s*(?:env\.\w+\.)?r2_buckets\s*\]\]|\"r2_buckets\"", text)),
+                # Secret-looking names with literal values in [vars]: names only, never values.
+                "secret_vars": sorted({m.group(1) for m in re.finditer(
+                    r"^\s*([A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PRIVATE|API_KEY|_KEY)[A-Z0-9_]*)\s*=\s*[\"'][^\"'$]{12,}[\"']",
+                    text, re.M) if not re.search(r"PUBLIC|PUBLISHABLE|SITE_KEY|ANON", m.group(1))}),
+            })
+    return found
+
+
+def inventory(repo):
+    inv = {}
+    routes, admin = set(), set()
+    for f in repo.code_files():
+        if NOT_APP.search(f):
+            continue
+        text = repo.text(f)
+        for rx in (ROUTE_DEF, PATH_CHECK):
+            for m in rx.finditer(text):
+                path = m.group(1).split("?")[0]
+                routes.add(path)
+                if re.search(r"admin|internal|debug|seed|cron", path, re.I):
+                    admin.add(path)
+        if FILE_ROUTE.search(f):
+            path = "/" + re.sub(r"(^|.*/)(app|src/app|pages|functions)/|/?route\.[jt]sx?$|\.[jt]sx?$", "", f)
+            routes.add(path)
+            if re.search(r"admin|internal|debug|seed|cron", path, re.I):
+                admin.add(path)
+    inv["routes"], inv["admin_routes"] = len(routes), len(admin)
+    inv["webhooks"] = len([r for r in routes if "webhook" in r.lower()])
+    tables = 0
+    for f in repo.files:
+        if f.lower().endswith(".sql") and SCHEMA_SQL.search(f) and not re.search(r"backup|dump|export", f, re.I):
+            tables += len(re.findall(r"create\s+table\s+(?:if\s+not\s+exists\s+)?", repo.text(f), re.I))
+        elif f.endswith(".prisma"):
+            tables += len(re.findall(r"^model\s+\w+\s*\{", repo.text(f), re.M))
+    tables += len(repo.grep(r"\b(?:sqliteTable|pgTable|mysqlTable)\s*\(", limit=500))
+    inv["tables"] = tables
+    wr = wrangler_configs(repo)
+    stores = []
+    if any(w["d1"] for w in wr): stores.append("Cloudflare D1")
+    if any(w["kv"] for w in wr): stores.append("Cloudflare KV")
+    for dep, label in (("@supabase/supabase-js", "Supabase"), ("firebase", "Firebase"), ("firebase-admin", "Firebase"),
+                       ("pg", "Postgres"), ("postgres", "Postgres"), ("@neondatabase/serverless", "Neon"),
+                       ("@planetscale/database", "PlanetScale"), ("mongoose", "MongoDB"), ("mongodb", "MongoDB"),
+                       ("@upstash/redis", "Upstash Redis"), ("@prisma/client", "Prisma")):
+        if dep in repo.deps and label not in stores:
+            stores.append(label)
+    inv["stores"] = stores
+    storage = []
+    if any(w["r2"] for w in wr): storage.append("Cloudflare R2")
+    for dep, label in (("@aws-sdk/client-s3", "S3"), ("aws-sdk", "S3"), ("@vercel/blob", "Vercel Blob"),
+                       ("uploadthing", "UploadThing"), ("cloudinary", "Cloudinary")):
+        if dep in repo.deps and label not in storage:
+            storage.append(label)
+    if "@supabase/supabase-js" in repo.deps and repo.grep(r"\.storage\.from\(", limit=1, app_only=True):
+        storage.append("Supabase Storage")
+    inv["storage"] = storage
+    paid = {label for dep, label in PAID_DEPS.items() if dep in repo.deps}
+    for host, label in PAID_HOSTS.items():
+        if label not in paid and repo.grep(re.escape(host), limit=1, app_only=True):
+            paid.add(label)
+    inv["paid"] = sorted(paid)
+    payments = [label for dep, label in (("stripe", "Stripe"), ("@paddle/paddle-node-sdk", "Paddle"),
+                                         ("@lemonsqueezy/lemonsqueezy.js", "Lemon Squeezy"), ("react-native-purchases", "RevenueCat"))
+                if dep in repo.deps]
+    if "Stripe" not in payments and repo.grep(r"api\.stripe\.com", limit=1, app_only=True):
+        payments.append("Stripe")
+    inv["payments"] = payments
+    inv["deploy_paths"] = len([1 for k, v in repo.scripts.items() if PROD_WRITE.search(str(v)) and "--dry-run" not in str(v)]) + \
+        len([f for f in repo.files if f.startswith(".github/workflows/") and PROD_WRITE.search(repo.text(f))])
+    inv["ai_config"] = [f for f in (".claude/settings.json", "CLAUDE.md", "AGENTS.md", ".cursorrules") if f in repo.files] + \
+        (["Cursor rules"] if any(f.startswith(".cursor/") for f in repo.files) else [])
+    exts = {}
+    for f in repo.files:
+        e = os.path.splitext(f)[1].lower()
+        if e:
+            exts[e] = exts.get(e, 0) + 1
+    inv["js"] = bool(repo.pkgs) or any(exts.get(e) for e in (".js", ".ts", ".tsx", ".jsx", ".mjs"))
+    lang = {".swift": "Swift", ".kt": "Kotlin", ".py": "Python", ".go": "Go", ".rb": "Ruby", ".php": "PHP",
+            ".java": "Java", ".rs": "Rust", ".dart": "Dart", ".cs": "C#"}
+    inv["language"] = next((lang[e] for e, _ in sorted(exts.items(), key=lambda kv: -kv[1]) if e in lang), None)
+    inv["wrangler"] = wr
+    return inv
+
+
 CHECKS = [check_01, check_02, check_03, check_04, check_05, check_06, check_07,
           check_08, check_09, check_10, check_11, check_12, check_13, check_14]
 
@@ -621,15 +757,93 @@ def review_link(results):
     return f"{SITE}/?from=check&s={codes}#request"
 
 
-def render(repo, results, started):
-    name = os.path.basename(repo.root)
+def plural(n, word, many=None):
+    return f"{n} {word if n == 1 else (many or word + 's')}"
+
+
+def glance(inv):
+    """What the app exposes, counted from its code: shows we understood it, and sizes what the review covers."""
+    items = []
+    if inv["routes"]:
+        items.append(plural(inv["routes"], "API route") +
+                     (f" ({inv['admin_routes']} admin, internal or scheduled)" if inv["admin_routes"] else ""))
+    if inv["webhooks"]:
+        items.append(plural(inv["webhooks"], "webhook handler"))
+    if inv["tables"]:
+        items.append(plural(inv["tables"], "database table"))
+    if inv["stores"]:
+        items.append("Data in " + ", ".join(inv["stores"]))
+    if inv["storage"]:
+        items.append("Files in " + ", ".join(inv["storage"]))
+    if inv["payments"]:
+        items.append("Takes payments with " + ", ".join(inv["payments"]))
+    if inv["paid"]:
+        items.append("Pay-per-use services: " + ", ".join(inv["paid"]))
+    if inv["deploy_paths"]:
+        items.append(plural(inv["deploy_paths"], "way", "ways") + " to change production (scripts and pipelines)")
+    if inv["ai_config"]:
+        items.append("AI assistant instructions or settings: " + ", ".join(inv["ai_config"]))
+    return items
+
+
+def review_scope(inv, results):
+    """What the full review would do for this app specifically. It names the work, never the answers."""
+    by = {r.id: r for r in results}
+    out = []
+    if inv["routes"]:
+        out.append(f"Trace all {inv['routes']} API routes for login and ownership checks"
+                   + (f", starting with the {inv['admin_routes']} admin and internal ones." if inv["admin_routes"] else "."))
+    if inv["tables"]:
+        out.append(f"Check who can read and change each of the {inv['tables']} database tables.")
+    if inv["webhooks"]:
+        out.append(f"Make sure the {plural(inv['webhooks'], 'webhook handler')} can't be faked or replayed.")
+    if inv["payments"]:
+        out.append(f"Check {', '.join(inv['payments'])} payments: prices set on the server, and no way into paid features without paying.")
+    if inv["paid"]:
+        out.append(f"Check {', '.join(inv['paid'])} usage for spending limits and abuse.")
+    if inv["storage"]:
+        out.append(f"Confirm files in {', '.join(inv['storage'])} are private.")
+    if inv["stores"]:
+        out.append(f"Confirm your {', '.join(inv['stores'])} backups exist, and walk you through a restore.")
+    if inv["deploy_paths"] or inv["ai_config"]:
+        out.append("Map who and what can change production, including AI assistants, and what stops a mistake.")
+    flagged = [r for r in results if r.status in ("R", "A")]
+    nv = [r for r in results if r.status == "NV"]
+    if flagged:
+        out.append(f"Confirm or clear the {plural(len(flagged), 'warning sign')} above, with evidence, and price each fix.")
+    if nv:
+        out.append(f"Settle the {plural(len(nv), 'check')} this basic check couldn't.")
+    return out[:7]
+
+
+def render(repo, results, started, inv=None):
+    inv = inv or inventory(repo)
+    name = repo.name
     commit = repo.git("rev-parse", "--short", "HEAD").stdout.strip() if repo.is_git else "not a git repo"
     lines = [f"# Thetis free check: {name}", "",
              f"**{overall(results)}**", "",
              "| " + " | ".join(r.id for r in results) + " |", "|" + "---|" * len(results),
              "| " + " | ".join(r.status for r in results) + " |", "",
              "R needs fixing · A weak spot · OK nothing found by this basic check · NV not checked · — doesn't apply", ""]
+    if not inv["js"]:
+        lang = inv["language"] or "a language this version doesn't read"
+        lines += [f"> **Limited coverage:** this version of the free check reads JavaScript and TypeScript apps. This repository "
+                  f"looks like {lang}, so only the git-history and change-control checks (01, 14) really apply. "
+                  "The full review covers any language.", ""]
     order = sorted(results, key=lambda r: (-SEVERITY[r.status], r.id))
+    top = [r for r in order if r.status in ("R", "A")][:3]
+    if top:
+        lines += ["## Start here", ""]
+        for r in top:
+            label = "Needs fixing" if r.status == "R" else "Weak spot"
+            lines.append(f"- **{label}: {r.name} ({r.id}).** {r.meaning} {r.found[0]}")
+    at_a_glance = glance(inv)
+    if at_a_glance:
+        lines += ["", "## Your app at a glance", ""] + [f"- {x}" for x in at_a_glance]
+    scope = review_scope(inv, results)
+    if scope:
+        lines += ["", f"## What the full review would do for {repo.name}", ""] + [f"- {x}" for x in scope]
+    lines += ["", "## All 14 checks", ""]
     for r in order:
         lines.append(f"## {r.id} {r.name}: {r.status}")
         if r.meaning and r.status in ("R", "A"):
@@ -663,6 +877,7 @@ def main(argv):
             "max_history_mb": 400, "max_history_seconds": 90}
     started = time.time()
     repo = Repo(root)
+    opts["inventory"] = inventory(repo)
     results = []
     for check in CHECKS:
         cid = check.__name__.split("_")[1]
@@ -675,7 +890,7 @@ def main(argv):
             r.rate("NV")
             r.found.append(f"This check couldn't run ({type(e).__name__}).")
             results.append(r)
-    report = render(repo, results, started)
+    report = render(repo, results, started, opts["inventory"])
     out_dir = os.path.expanduser(flags["--out"] if isinstance(flags.get("--out"), str) else "~/.thetis-check/reports")
     os.makedirs(out_dir, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
