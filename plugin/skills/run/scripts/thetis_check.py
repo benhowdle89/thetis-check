@@ -22,7 +22,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 SITE = "https://thetis.benhowdle.im"
 EMAIL = "hello@benhowdle.im"
 
@@ -524,13 +524,17 @@ def check_12(repo, opts):
         direct = bool(v.get("isDirect"))
         flag = bool(SENSITIVE_PKG.search(name))
         status = "R" if direct and (sev == "critical" or (sev == "high" and flag)) else "A"
-        bad.append((status, sev, name, n_adv, direct))
-    for status, sev, name, n_adv, direct in sorted(bad, key=lambda b: (-SEVERITY[b[0]], b[2])):
+        fix = v.get("fixAvailable")
+        fix_note = ("an update fixes it" if fix is True else "the fix needs a major upgrade"
+                    if isinstance(fix, dict) and fix.get("isSemVerMajor") else "an update fixes it" if fix else "no fix published yet")
+        bad.append((status, sev, name, n_adv, direct, fix_note))
+    for status, *_ in bad:
         r.rate(status)
     if bad:
         top = sorted(bad, key=lambda b: (-SEVERITY[b[0]], ["critical", "high", "moderate"].index(b[1])))[:8]
         r.found.append(f"{len(bad)} {'library' if len(bad) == 1 else 'libraries'} with known holes at moderate or above: " +
-                       "; ".join(f"{n} ({s}, {'direct' if d else 'via another library'})" for _, s, n, _, d in top) +
+                       "; ".join(f"{n} ({s}, {'direct' if d else 'via another library'}, "
+                                 f"{a} advisor{'y' if a == 1 else 'ies'}; {fx})" for _, s, n, a, d, fx in top) +
                        (" and more." if len(bad) > 8 else "."))
     else:
         r.rate("OK")
@@ -558,7 +562,13 @@ def check_13(repo, opts):
     r.unseen = "Spending caps and alerts, which live in each provider's dashboard."
     server_exts = CODE_EXT - {".tsx", ".jsx", ".vue", ".svelte", ".astro", ".html"}
     limits = repo.grep(r"rate.?limit|ratelimit|throttl|@upstash/ratelimit|express-rate-limit|limiter", exts=server_exts,
-                       flags=re.I, limit=5, app_only=True)
+                       flags=re.I, limit=200, app_only=True)
+    # Cite where a limit is applied, not every mention: skip comments, bare strings (labels, log messages)
+    # and type declarations, and list route registrations that use a limiter first.
+    noise = re.compile(r"^(//|/?\*|#)|^['\"`][^'\"`]*['\"`],?$|^(export\s+)?(declare\s+)?(interface|type)\s")
+    limits = [h for h in limits if not noise.search(h[2])]
+    on_routes = [h for h in limits if re.search(r"\.(get|post|put|patch|delete|all|use)\(", h[2])]
+    limits = on_routes + [h for h in limits if h not in on_routes]
     warnings = repo.grep(r"console\.(warn|error)\(.*\b(rate.?limit|cost|spend|budget|token.?limit|governor|quota)\b.*\b(off|disabled|unbounded|uncapped|no limit)\b"
                          r"|console\.(warn|error)\(.*\b(unbounded|uncapped)\b.*\b(spend|cost)\b", flags=re.I, app_only=True)
     if warnings:
@@ -569,7 +579,12 @@ def check_13(repo, opts):
         r.found.append(f"Uses paid services ({', '.join(paid[:5])}) and no rate limiting was found anywhere.")
     else:
         r.rate("NV")
-        r.found.append(f"Uses paid services ({', '.join(paid[:5])}); rate limiting appears at {where(limits, 2)}. "
+        if on_routes:
+            files = sorted({f for f, _, _ in on_routes})
+            seen = f"is applied to {len(on_routes)} route{'s' if len(on_routes) != 1 else ''} in {', '.join(files[:3])}"
+        else:
+            seen = f"appears at {where(limits, 2)}"
+        r.found.append(f"Uses paid services ({', '.join(paid[:5])}); rate limiting {seen}. "
                        "Whether it covers every paid route needs checking.")
     return r
 
