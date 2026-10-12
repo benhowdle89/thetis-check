@@ -22,7 +22,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 SITE = "https://thetis.benhowdle.im"
 EMAIL = "hello@benhowdle.im"
 
@@ -612,6 +612,15 @@ def overall(results):
     return f"NO RED FLAGS FOUND BY THE BASIC CHECK ({nv} not checked). That isn't the same as safe."
 
 
+STRIP_CODE = {"R": "R", "A": "A", "OK": "O", "NV": "N", "—": "-"}
+
+
+def review_link(results):
+    """Link to the review form, carrying only the 14 ratings: no paths, names or findings."""
+    codes = "".join(STRIP_CODE[r.status] for r in sorted(results, key=lambda r: r.id))
+    return f"{SITE}/?from=check&s={codes}#request"
+
+
 def render(repo, results, started):
     name = os.path.basename(repo.root)
     commit = repo.git("rev-parse", "--short", "HEAD").stdout.strip() if repo.is_git else "not a git repo"
@@ -635,7 +644,8 @@ def render(repo, results, started):
               "This is a basic, automatic check: plain scripts, no AI, read-only. It finds common warning signs; it can't "
               "prove an app is safe, and it can't see your dashboards. \"OK\" means only that this check found nothing.", "",
               f"**Want the full review?** A person reads the code behind every check, confirms each finding, and gives you a "
-              f"plain-English report with fixes you only pay for when their tests pass: {SITE} · {EMAIL}", "",
+              f"plain-English report with fixes you only pay for when their tests pass. Request one here (the link "
+              f"carries only the 14 ratings above, nothing from your code): {review_link(results)} · {EMAIL}", "",
               f"*{name} at {commit} · Thetis free check {VERSION} · {datetime.date.today().isoformat()} · {took:.0f}s*"]
     return "\n".join(lines) + "\n"
 
