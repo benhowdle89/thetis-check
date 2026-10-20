@@ -1,6 +1,6 @@
 {
   "name": "thetis-check",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Free production-readiness check for apps built with AI coding tools: 14 basic static checks, read-only, no AI judgement.",
   "author": {
     "name": "Ben Howdle",

@@ -25,7 +25,13 @@ In Claude Code, in your app's folder:
 /thetis-check:run
 ```
 
-Not using Claude Code? Run the script directly:
+Not using Claude Code (Cursor, Lovable, anything else)? Run it in one line from your app's folder. It needs only `python3` and `git`:
+
+```sh
+curl -fsSL https://thetis.benhowdle.im/check.py | python3 - .
+```
+
+That fetches the same script from this repository. To read it before running it, clone instead:
 
 ```sh
 git clone https://github.com/benhowdle89/thetis-check

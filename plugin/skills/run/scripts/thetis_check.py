@@ -22,7 +22,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 SITE = "https://thetis.benhowdle.im"
 EMAIL = "hello@benhowdle.im"
 
@@ -872,9 +872,10 @@ def render(repo, results, started, inv=None):
     lines += ["---", "",
               "This is a basic, automatic check: plain scripts, no AI, read-only. It finds common warning signs; it can't "
               "prove an app is safe, and it can't see your dashboards. \"OK\" means only that this check found nothing.", "",
-              f"**Want the full review?** Ben runs the Thetis review engine on your code, checks every finding himself, and gives you a "
-              f"plain-English report with fixes you only pay for when their tests pass. Request one here (the link "
-              f"carries only the 14 ratings above, nothing from your code): {review_link(results)} · {EMAIL}", "",
+              f"**Ran it? Tell Ben what it found, or ask for the full review:** {review_link(results)} "
+              f"(the link carries only the 14 ratings above, nothing from your code). In the full review, Ben runs the "
+              f"Thetis review engine on your code, checks every finding himself, and gives you a plain-English report with "
+              f"fixes you only pay for when their tests pass. · {EMAIL}", "",
               f"*{name} at {commit} · Thetis free check {VERSION} · {datetime.date.today().isoformat()} · {took:.0f}s*"]
     return "\n".join(lines) + "\n"
 
