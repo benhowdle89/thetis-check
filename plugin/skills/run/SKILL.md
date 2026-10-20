@@ -2,7 +2,6 @@
 name: run
 description: Run the free Thetis production-readiness check on the current repository. 14 basic static checks (secrets in history, data exposure, committed data dumps, payments, backups, dependencies, runaway cost, who can change production), read-only, no AI judgement. Use when the user asks whether their app is ready for production or launch, or wants a quick security sanity check.
 argument-hint: "[path] [--offline]"
-allowed-tools: Bash(python3 *)
 ---
 
 # Thetis free check
@@ -13,7 +12,7 @@ The user can't see command output: it's collapsed in their view. So **your final
 
 ## Steps
 
-1. Tell the user, in one line, that the check is read-only and can take a few minutes on a large repository because it scans the whole git history.
+1. Tell the user, in one line, that the check is read-only and can take a few minutes on a large repository because it scans the whole git history, and that Claude Code will ask them to approve the one command it runs.
 2. Run:
    ```bash
    python3 -I "${CLAUDE_SKILL_DIR}/scripts/thetis_check.py" $ARGUMENTS

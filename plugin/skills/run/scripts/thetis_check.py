@@ -22,7 +22,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.3.3"
+VERSION = "0.3.4"
 SITE = "https://thetis.benhowdle.im"
 EMAIL = "hello@benhowdle.im"
 
@@ -759,7 +759,8 @@ def overall(results):
     if "R" in statuses:
         return f"RED FLAGS FOUND ({statuses.count('R')} need fixing, {nv} not checked)"
     if "A" in statuses:
-        return f"WEAK SPOTS FOUND ({statuses.count('A')} weak spots, {nv} not checked)"
+        a = statuses.count("A")
+        return f"WEAK SPOTS FOUND ({a} weak spot{'' if a == 1 else 's'}, {nv} not checked)"
     return f"NO RED FLAGS FOUND BY THE BASIC CHECK ({nv} not checked). That isn't the same as safe."
 
 
