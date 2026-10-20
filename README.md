@@ -41,3 +41,7 @@ python3 thetis-check/plugin/skills/run/scripts/thetis_check.py /path/to/your/app
 ## Requirements
 
 Claude Code, python3 and git. Optional: npm (for check 12) and [gitleaks](https://github.com/gitleaks/gitleaks), which gives a more thorough history scan for check 01.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

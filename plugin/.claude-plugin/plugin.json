@@ -1,8 +1,23 @@
 {
   "name": "thetis-check",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Free production-readiness check for apps built with AI coding tools: 14 basic static checks, read-only, no AI judgement.",
-  "author": { "name": "Ben Howdle", "email": "hello@benhowdle.im", "url": "https://thetis.benhowdle.im" },
+  "author": {
+    "name": "Ben Howdle",
+    "email": "hello@benhowdle.im",
+    "url": "https://thetis.benhowdle.im"
+  },
   "homepage": "https://thetis.benhowdle.im",
-  "keywords": ["security", "production-readiness", "audit", "launch-checklist"]
+  "keywords": [
+    "security",
+    "production-readiness",
+    "audit",
+    "launch-checklist",
+    "secrets",
+    "supabase",
+    "stripe",
+    "vibe-coding"
+  ],
+  "repository": "https://github.com/benhowdle89/thetis-check",
+  "license": "MIT"
 }
